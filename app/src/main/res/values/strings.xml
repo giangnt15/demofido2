@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">DemoFido2</string>
+    <string name="asset_statements" translatable="false">[{ \"include\": \"https://testesignwebsiteadminrd.misa.com.vn/.well-known/assetlinks.json\" }]</string>
+</resources>
