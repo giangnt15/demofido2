@@ -28,8 +28,13 @@
             android:id="@+id/loginButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:onClick=""
             android:text="Đăng nhập" />
+
+        <Button
+            android:id="@+id/passwordlessLoginButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Đăng nhập không cần mật khẩu" />
 
     </LinearLayout>
 </LinearLayout>

@@ -2,8 +2,11 @@ package com.example.demofido2
 
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.content.SharedPreferences
 import android.os.Bundle
+import android.util.Base64
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Toast
@@ -18,55 +21,146 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.demofido2.ui.theme.DemoFido2Theme
+import com.google.android.gms.fido.Fido
+import com.google.android.gms.fido.fido2.api.common.AuthenticatorAssertionResponse
+import com.google.android.gms.fido.fido2.api.common.AuthenticatorErrorResponse
+import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialDescriptor
+import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialRequestOptions
+import com.google.android.gms.fido.fido2.api.common.PublicKeyCredentialType
 import com.google.gson.Gson
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient;
 import okhttp3.Request
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.ResponseBody
+import org.json.JSONArray
+import org.json.JSONObject
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 import java.lang.Exception
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 
-var RP_SERVER_URL = "https://webauthndemo.singularkey.com";
+
+var RP_SERVER_URL = "https://testesignwebsiteadminrd.misa.com.vn";
+
+var RPID = "testesignwebsiteadminrd.misa.com.vn";
+const val BASE64_FLAG = Base64.NO_PADDING or Base64.NO_WRAP or Base64.URL_SAFE
 
 class MainActivity : ComponentActivity() {
 
     private lateinit var loginButton: Button
+    private lateinit var passwordlessLoginButton: Button
     private lateinit var usernameText: EditText
     private lateinit var paswordText: EditText
+
+    companion object {
+        private const val LOG_TAG = "Fido2Demo"
+        private const val REQUEST_CODE_REGISTER = 1
+        private const val REQUEST_CODE_SIGN = 2
+        private const val KEY_HANDLE_PREF = "key_handle"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sharedPreferences: SharedPreferences = getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
-        setContentView(R.layout.main_activity)
-        loginButton = findViewById(R.id.loginButton)
-        usernameText = findViewById(R.id.usernameText)
-        paswordText = findViewById(R.id.passwordText)
-        loginButton.setOnClickListener{
-            val username = usernameText.text.toString()
-            val password = paswordText.text.toString()
-            Executors.newSingleThreadExecutor().execute {
-                var loginRes = login(username,password);
-                if (loginRes==null||!loginRes.Success){
-                    runOnUiThread{
-                        Toast.makeText(applicationContext, "Login failed!", Toast.LENGTH_SHORT).show()
-                    }
-                }else{
-                    try{
-                        val editor: SharedPreferences.Editor = sharedPreferences.edit()
-                        editor.putString("accessToken", loginRes.Data.AccessToken);
-                        editor.apply()
-                        val intent = Intent(this, RegisterPasswordless::class.java)
-                        startActivity(intent)
-                    }catch (e: Exception){
-                        println(e)
-                    }
+        if (sharedPreferences.contains("accessToken")){
+            val intent = Intent(this, RegisterPasswordless::class.java)
+            startActivity(intent)
+        }else{
+            setContentView(R.layout.main_activity)
+            loginButton = findViewById(R.id.loginButton)
+            usernameText = findViewById(R.id.usernameText)
+            paswordText = findViewById(R.id.passwordText)
+            passwordlessLoginButton = findViewById(R.id.passwordlessLoginButton)
+            passwordlessLoginButton.setOnClickListener {
+                fido2AuthInitiate();
+            }
+            loginButton.setOnClickListener{
+                val username = usernameText.text.toString()
+                val password = paswordText.text.toString()
+                Executors.newSingleThreadExecutor().execute {
+                    var loginRes = login(username,password);
+                    if (loginRes==null||!loginRes.Success){
+                        runOnUiThread{
+                            Toast.makeText(applicationContext, "Login failed!", Toast.LENGTH_SHORT).show()
+                        }
+                    }else{
+                        try{
+                            val editor: SharedPreferences.Editor = sharedPreferences.edit()
+                            editor.putString("accessToken", loginRes.Data.AccessToken);
+                            editor.apply()
+                            val intent = Intent(this, RegisterPasswordless::class.java)
+                            startActivity(intent)
+                        }catch (e: Exception){
+                            println(e)
+                        }
 
+                    }
+                }
+
+            }
+        }
+    }
+
+    //**********************************************************************************************************//
+    //******************************* Android FIDO2 API Response ***********************************************//
+    //**********************************************************************************************************//
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        Log.d(MainActivity.LOG_TAG, "onActivityResult - requestCode: $requestCode, resultCode: $resultCode")
+
+        when (resultCode) {
+            RESULT_OK -> {
+                data?.let {
+                    if (it.hasExtra(Fido.FIDO2_KEY_ERROR_EXTRA)) {
+
+                        val errorExtra = data.getByteArrayExtra(Fido.FIDO2_KEY_ERROR_EXTRA)
+                        val authenticatorErrorResponse =
+                            errorExtra?.let { it1 ->
+                                AuthenticatorErrorResponse.deserializeFromBytes(
+                                    it1
+                                )
+                            }
+                        val errorName = authenticatorErrorResponse?.errorCode?.name
+                        val errorMessage = authenticatorErrorResponse?.errorMessage
+
+                        Log.e(MainActivity.LOG_TAG, "errorCode.name: $errorName")
+                        Log.e(MainActivity.LOG_TAG, "errorMessage: $errorMessage")
+
+//                        resultText.text =
+//                            "An Error Occurred\n\nError Name:\n$errorName\n\nError Message:\n$errorMessage"
+                        runOnUiThread {
+                            Toast.makeText(applicationContext, "An Error Occurred\n\nError Name:\n$errorName\n\nError Message:\n$errorMessage", Toast.LENGTH_SHORT).show()
+                        }
+                    } else if (it.hasExtra(Fido.FIDO2_KEY_RESPONSE_EXTRA)) {
+                        val fido2Response = data.getByteArrayExtra(Fido.FIDO2_KEY_RESPONSE_EXTRA)
+                        when (requestCode) {
+                            MainActivity.REQUEST_CODE_SIGN -> fido2Response?.let { it1 -> fido2AuthComplete(it1) }
+                        }
+                    }
                 }
             }
-
+            RESULT_CANCELED -> {
+                val result = "Operation is cancelled"
+                runOnUiThread {
+                    Toast.makeText(applicationContext, result, Toast.LENGTH_SHORT).show()
+                }
+//                resultText.text = result
+                Log.d(MainActivity.LOG_TAG, result)
+            }
+            else -> {
+                val result = "Operation failed, with resultCode: $resultCode"
+                runOnUiThread {
+                    Toast.makeText(applicationContext, result, Toast.LENGTH_SHORT).show()
+                }
+//                resultText.text = result
+                Log.e(MainActivity.LOG_TAG, result)
+            }
         }
-
     }
 
     private fun login(username: String, password: String) : MisaIdResponse?{
@@ -103,7 +197,167 @@ class MainActivity : ComponentActivity() {
             return null;
         }
     }
+    //**********************************************************************************************************//
+    //******************************* FIDO2 Authentication Step 1 **********************************************//
+    //******************************* Get challenge from the Server ********************************************//
+    //**********************************************************************************************************//
+    private fun fido2AuthInitiate() {
 
+        val result = JSONObject()
+        val mediaType = "application/json".toMediaTypeOrNull()
+//        result.put("username", usernameButton.text.toString())
+        val requestBody = RequestBody.create(mediaType, result.toString())
+        try {
+            RPApiService.getApi().authInitiate(requestBody)
+                .enqueue(object : Callback<ResponseBody> {
+                    override fun onResponse(
+                        call: Call<ResponseBody>,
+                        response: Response<ResponseBody>
+                    ) {
+                        if (response.isSuccessful) {
+                            val obj = JSONObject(response.body()?.string())
+                            val c = obj.getString("challenge")
+                            val challenge = Base64.decode(c, BASE64_FLAG)
+                            val allowCredentials = obj.getJSONArray("allowCredentials")
+
+                            if (allowCredentials != null) {
+                                fido2AndroidAuth(allowCredentials, challenge)
+                            }
+
+                            Log.d("response", response.message())
+                        } else {
+                            Log.d("response", response.errorBody().toString())
+                            runOnUiThread {
+                                Toast.makeText(applicationContext,
+                                    "Authentication Failed\n$response", Toast.LENGTH_SHORT).show()
+                            }
+//                            resultText.text = "Authentication Failed\n$response"
+                        }
+
+                    }
+
+                    override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
+                        t.message?.let { Log.d("response", it) }
+
+                    }
+                })
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    //**********************************************************************************************************//
+    //******************************* FIDO2 Authentication Step 2 **********************************************//
+    //******************************* Invoke Android FIDO2 API  ************************************************//
+    //**********************************************************************************************************//
+    private fun fido2AndroidAuth(
+        allowCredentials: JSONArray,
+        challenge: ByteArray
+    ) {
+        try {
+            val list = mutableListOf<PublicKeyCredentialDescriptor>()
+            for (i in 0..(allowCredentials.length() - 1)) {
+                val item = allowCredentials.getJSONObject(i)
+                list.add(
+                    PublicKeyCredentialDescriptor(
+                        PublicKeyCredentialType.PUBLIC_KEY.toString(),
+                        Base64.decode(item.getString("id"), BASE64_FLAG),
+                        /* transports */ null
+                    )
+                )
+            }
+
+            val options = PublicKeyCredentialRequestOptions.Builder()
+                .setRpId(RPID)
+                .setAllowList(list)
+                .setChallenge(challenge)
+                .build()
+
+            val fido2ApiClient = Fido.getFido2ApiClient(applicationContext)
+            val fido2PendingIntentTask = fido2ApiClient.getSignIntent(options)
+            fido2PendingIntentTask.addOnSuccessListener { fido2PendingIntent ->
+                if (fido2PendingIntent.hasPendingIntent()) {
+                    try {
+                        Log.d(MainActivity.LOG_TAG, "launching Fido2 Pending Intent")
+                        fido2PendingIntent.launchPendingIntent(this@MainActivity,
+                            MainActivity.REQUEST_CODE_SIGN
+                        )
+                    } catch (e: IntentSender.SendIntentException) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    //**********************************************************************************************************//
+    //******************************* FIDO2 Authentication Step 3 **********************************************//
+    //**************** Send Signed Challenge (Assertion) to the Server for verification ************************//
+    //**********************************************************************************************************//
+    private fun fido2AuthComplete(fido2Response: ByteArray) {
+
+        val assertionResponse = AuthenticatorAssertionResponse.deserializeFromBytes(fido2Response)
+        val credId = Base64.encodeToString(assertionResponse.keyHandle, BASE64_FLAG)
+        val signature = Base64.encodeToString(assertionResponse.signature, BASE64_FLAG)
+        val authenticatorData =
+            Base64.encodeToString(assertionResponse.authenticatorData, BASE64_FLAG)
+        val clientDataJson = Base64.encodeToString(assertionResponse.clientDataJSON, BASE64_FLAG)
+
+
+        val response = JSONObject()
+        response.put("clientDataJSON", clientDataJson)
+        response.put("signature", signature)
+        response.put("userHandle", "")
+        response.put("authenticatorData", authenticatorData)
+
+        val jsonObject = JSONObject()
+        jsonObject.put("type", "public-key")
+        jsonObject.put("id", credId)
+        jsonObject.put("rawId", credId)
+        jsonObject.put("getClientExtensionResults", JSONObject())
+        jsonObject.put("response", response)
+
+        val mediaType = "application/json".toMediaTypeOrNull()
+        val requestBody = RequestBody.create(mediaType, jsonObject.toString())
+
+        try {
+            RPApiService.getApi()
+//                .authComplete("username=${usernameButton.text.toString()}", requestBody)
+                .authComplete("username=abc", requestBody)
+                .enqueue(object : Callback<ResponseBody> {
+                    override fun onResponse(
+                        call: Call<ResponseBody>,
+                        response: Response<ResponseBody>
+                    ) {
+                        if (response.isSuccessful) {
+                            runOnUiThread {
+                                Toast.makeText(applicationContext,
+                                    "Authentication Successful", Toast.LENGTH_SHORT).show()
+                            }
+//                            resultText.text = "Authentication Successful"
+                            Log.d("response", response.message())
+                        } else {
+                            Log.d("response", response.errorBody().toString())
+                            runOnUiThread {
+                                Toast.makeText(applicationContext,
+                                    "Authentication Failed\n$response", Toast.LENGTH_SHORT).show()
+                            }
+//                            resultText.text = "Authentication Failed\n$response"
+                        }
+
+                    }
+
+                    override fun onFailure(call: Call<ResponseBody>, t: Throwable) {
+                        t.message?.let { Log.d("response", it) }
+
+                    }
+                })
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 }
 
 
