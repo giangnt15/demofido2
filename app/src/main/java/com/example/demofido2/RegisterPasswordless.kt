@@ -29,6 +29,7 @@ class RegisterPasswordless: ComponentActivity() {
 
     private lateinit var btnRegPasswordless: Button
     private lateinit var btnSignout: Button
+    private lateinit var _id: String;
 
     companion object {
         private const val LOG_TAG = "Fido2Demo"
@@ -59,6 +60,13 @@ class RegisterPasswordless: ComponentActivity() {
                 };
             }
         }
+    }
+
+    private fun storeKeyHandle(keyHandle: ByteArray) {
+        val sharedPreferences: SharedPreferences = getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
+        sharedPreferences.edit()
+            .putString(RegisterPasswordless.KEY_HANDLE_PREF, Base64.encodeToString(keyHandle, BASE64_FLAG))
+            .apply();
     }
 
     //**********************************************************************************************************//
@@ -157,7 +165,12 @@ class RegisterPasswordless: ComponentActivity() {
                     ) {
                         if (response.isSuccessful) {
                             try {
-                                val intiateResponse = response.body()?.string()?.let { JSONObject(it) }
+                                val res = response.body()?.string()?.let { JSONObject(it) }
+                                val id = res?.getString("id");
+                                if (id != null) {
+                                    _id = id
+                                };
+                                val intiateResponse = res?.getJSONObject("credentialCreateOptions")
                                 val c = intiateResponse?.getString("challenge")
                                 val challenge = Base64.decode(c!!, BASE64_FLAG)
                                 var rpname = intiateResponse?.getJSONObject("rp")!!.getString("name")
@@ -302,17 +315,19 @@ class RegisterPasswordless: ComponentActivity() {
     private fun fido2RegisterComplete(fido2Response: ByteArray, accessToken: String) {
         val attestationResponse =
             AuthenticatorAttestationResponse.deserializeFromBytes(fido2Response)
-        val credId = Base64.encodeToString(attestationResponse.keyHandle, BASE64_FLAG)
-        val clientDataJson = Base64.encodeToString(attestationResponse.clientDataJSON, BASE64_FLAG)
+//        val credId = Base64.encodeToString(attestationResponse.keyHandle, BASE64_FLAG)
+        val credId = Helper.coerceToBase64Url(attestationResponse.keyHandle, BASE64_FLAG)
+        val clientDataJson = Helper.coerceToBase64Url(attestationResponse.clientDataJSON, BASE64_FLAG)
         val attestationObjectBase64 =
-            Base64.encodeToString(attestationResponse.attestationObject, Base64.DEFAULT)
+            Helper.coerceToBase64Url(attestationResponse.attestationObject, BASE64_FLAG)
+
+        storeKeyHandle(attestationResponse.keyHandle);
 
         val webAuthnResponse = JSONObject()
         val response = JSONObject()
 
         response.put("attestationObject", attestationObjectBase64)
         response.put("clientDataJSON", clientDataJson)
-
 
         webAuthnResponse.put("type", "public-key")
         webAuthnResponse.put("id", credId)
@@ -326,7 +341,7 @@ class RegisterPasswordless: ComponentActivity() {
         try {
             RPApiService.getApi(accessToken)
 //                .registerComplete("username=${usernameButton.text.toString()}", requestBody)
-                .registerComplete("username=abc", requestBody)
+                .registerComplete(_id,"username=abc", requestBody)
                 //.registerComplete( requestBody)
                 .enqueue(object : Callback<ResponseBody> {
                     override fun onResponse(

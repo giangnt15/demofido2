@@ -14,6 +14,7 @@ import retrofit2.http.Body
 import retrofit2.http.Header
 import retrofit2.http.Headers
 import retrofit2.http.POST
+import retrofit2.http.Query
 import java.net.CookieManager
 import java.net.CookiePolicy
 import java.util.concurrent.TimeUnit
@@ -21,24 +22,26 @@ import java.util.concurrent.TimeUnit
 
 interface RPApi {
     @Headers("Accept: application/json", "Content-Type: application/json")
-    @POST("/api/account/fido2/attestation/options")
+    @POST("/api/account/fido2/mobile/attestation/options")
     fun registerInitiate(@Body postBody: RequestBody): Call<ResponseBody>
 
     @Headers("Accept: application/json", "Content-Type: application/json")
     @POST("/api/account/fido2/attestation/result")
     fun registerComplete(
+        @Query("id") id: String,
         @Header("Cookie") cookie: String,
         @Body body: RequestBody
     ): Call<ResponseBody>
     //fun registerComplete(@Body body: RequestBody): Call<ResponseBody>
 
     @Headers("Accept: application/json", "Content-Type: application/json")
-    @POST("/api/account/fido2/assertion/options")
+    @POST("/api/account/fido2/mobile/assertion/options")
     fun authInitiate(@Body postBody: RequestBody): Call<ResponseBody>
 
     @Headers("Accept: application/json", "Content-Type: application/json")
     @POST("/api/account/fido2/assertion/result")
     fun authComplete(
+        @Query("id") id: String,
         @Header("Cookie") cookie: String,
         @Body postBody: RequestBody
     ): Call<ResponseBody>

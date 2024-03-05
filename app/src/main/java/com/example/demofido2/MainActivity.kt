@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var passwordlessLoginButton: Button
     private lateinit var usernameText: EditText
     private lateinit var paswordText: EditText
+    private lateinit var _id: String
 
     companion object {
         private const val LOG_TAG = "Fido2Demo"
@@ -215,7 +216,9 @@ class MainActivity : ComponentActivity() {
                         response: Response<ResponseBody>
                     ) {
                         if (response.isSuccessful) {
-                            val obj = JSONObject(response.body()?.string())
+                            val res = JSONObject(response.body()?.string());
+                            _id = res.getString("id");
+                            val obj = res.getJSONObject("assertionOptions")
                             val c = obj.getString("challenge")
                             val challenge = Base64.decode(c, BASE64_FLAG)
                             val allowCredentials = obj.getJSONArray("allowCredentials")
@@ -266,6 +269,13 @@ class MainActivity : ComponentActivity() {
                     )
                 )
             }
+            list.add(
+                PublicKeyCredentialDescriptor(
+                    PublicKeyCredentialType.PUBLIC_KEY.toString(),
+                    loadKeyHandle(),
+                    null
+                )
+            )
 
             val options = PublicKeyCredentialRequestOptions.Builder()
                 .setRpId(RPID)
@@ -299,11 +309,13 @@ class MainActivity : ComponentActivity() {
     private fun fido2AuthComplete(fido2Response: ByteArray) {
 
         val assertionResponse = AuthenticatorAssertionResponse.deserializeFromBytes(fido2Response)
-        val credId = Base64.encodeToString(assertionResponse.keyHandle, BASE64_FLAG)
-        val signature = Base64.encodeToString(assertionResponse.signature, BASE64_FLAG)
+        val credId = Helper.coerceToBase64Url(assertionResponse.keyHandle, BASE64_FLAG)
+
+//        val credId = Helper.coerceToArrayBuffer(assertionResponse.keyHandle, "keyHandle" , BASE64_FLAG)
+        val signature = Helper.coerceToBase64Url(assertionResponse.signature, BASE64_FLAG)
         val authenticatorData =
-            Base64.encodeToString(assertionResponse.authenticatorData, BASE64_FLAG)
-        val clientDataJson = Base64.encodeToString(assertionResponse.clientDataJSON, BASE64_FLAG)
+            Helper.coerceToBase64Url(assertionResponse.authenticatorData, BASE64_FLAG)
+        val clientDataJson = Helper.coerceToBase64Url(assertionResponse.clientDataJSON, BASE64_FLAG)
 
 
         val response = JSONObject()
@@ -325,7 +337,7 @@ class MainActivity : ComponentActivity() {
         try {
             RPApiService.getApi()
 //                .authComplete("username=${usernameButton.text.toString()}", requestBody)
-                .authComplete("username=abc", requestBody)
+                .authComplete(_id,"username=abc", requestBody)
                 .enqueue(object : Callback<ResponseBody> {
                     override fun onResponse(
                         call: Call<ResponseBody>,
@@ -357,6 +369,13 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun loadKeyHandle(): ByteArray? {
+        val sharedPreferences: SharedPreferences = getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
+        val keyHandleBase64 = sharedPreferences
+            .getString(MainActivity.KEY_HANDLE_PREF, null);
+        return Base64.decode(keyHandleBase64, BASE64_FLAG)
     }
 }
 
