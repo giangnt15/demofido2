@@ -269,13 +269,16 @@ class MainActivity : ComponentActivity() {
                     )
                 )
             }
-            list.add(
-                PublicKeyCredentialDescriptor(
-                    PublicKeyCredentialType.PUBLIC_KEY.toString(),
-                    loadKeyHandle(),
-                    null
-                )
-            )
+//            val keys = loadKeyHandle();
+//            for (key in keys){
+//                list.add(
+//                    PublicKeyCredentialDescriptor(
+//                        PublicKeyCredentialType.PUBLIC_KEY.toString(),
+//                        key,
+//                        null
+//                    )
+//                )
+//            }
 
             val options = PublicKeyCredentialRequestOptions.Builder()
                 .setRpId(RPID)
@@ -321,7 +324,7 @@ class MainActivity : ComponentActivity() {
         val response = JSONObject()
         response.put("clientDataJSON", clientDataJson)
         response.put("signature", signature)
-        response.put("userHandle", "")
+//        response.put("userHandle", "")
         response.put("authenticatorData", authenticatorData)
 
         val jsonObject = JSONObject()
@@ -347,9 +350,23 @@ class MainActivity : ComponentActivity() {
                             runOnUiThread {
                                 Toast.makeText(applicationContext,
                                     "Authentication Successful", Toast.LENGTH_SHORT).show()
+                                try{
+                                    val res = response.body()?.string()?.let { JSONObject(it) };
+                                    val sharedPreferences: SharedPreferences = getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
+                                    val editor: SharedPreferences.Editor = sharedPreferences.edit()
+                                    if (res != null) {
+                                        editor.putString("accessToken", res.getString("accessToken"))
+                                    };
+                                    editor.apply()
+                                    val intent = Intent(applicationContext, RegisterPasswordless::class.java)
+                                    startActivity(intent)
+                                }catch (e: Exception){
+                                    println(e)
+                                }
                             }
 //                            resultText.text = "Authentication Successful"
                             Log.d("response", response.message())
+
                         } else {
                             Log.d("response", response.errorBody().toString())
                             runOnUiThread {
@@ -371,11 +388,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loadKeyHandle(): ByteArray? {
+    private fun loadKeyHandle(): HashSet<ByteArray> {
         val sharedPreferences: SharedPreferences = getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
-        val keyHandleBase64 = sharedPreferences
-            .getString(MainActivity.KEY_HANDLE_PREF, null);
-        return Base64.decode(keyHandleBase64, BASE64_FLAG)
+        val keys = sharedPreferences.getStringSet(MainActivity.KEY_HANDLE_PREF, HashSet<String>());
+//        val keyHandleBase64 = sharedPreferences
+//            .getString(MainActivity.KEY_HANDLE_PREF, null);
+        val res = HashSet<ByteArray>();
+        if (keys != null) {
+            for (item in keys){
+                res.add(Base64.decode(item, BASE64_FLAG));
+            }
+        }
+        return res;
     }
 }
 

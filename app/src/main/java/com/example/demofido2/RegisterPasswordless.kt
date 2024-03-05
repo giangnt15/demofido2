@@ -1,5 +1,6 @@
 package com.example.demofido2
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
@@ -8,28 +9,27 @@ import android.os.Bundle
 import android.util.Base64
 import android.util.Log
 import android.widget.Button
-import android.widget.EditText
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.RequestBody
-import org.json.JSONObject
-import java.util.concurrent.Executors
 import com.google.android.gms.fido.Fido
 import com.google.android.gms.fido.fido2.api.common.*
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody
 import org.json.JSONArray
+import org.json.JSONObject
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
-import kotlin.Exception
 
 class RegisterPasswordless: ComponentActivity() {
 
     private lateinit var btnRegPasswordless: Button
     private lateinit var btnSignout: Button
     private lateinit var _id: String;
+    private lateinit var textView: TextView;
 
     companion object {
         private const val LOG_TAG = "Fido2Demo"
@@ -38,6 +38,7 @@ class RegisterPasswordless: ComponentActivity() {
         private const val KEY_HANDLE_PREF = "key_handle"
     }
 
+    @SuppressLint("SetTextI18n")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val sharedPreferences: SharedPreferences = getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
@@ -49,6 +50,11 @@ class RegisterPasswordless: ComponentActivity() {
             setContentView(R.layout.reg_passwordless)
             btnRegPasswordless = findViewById(R.id.btnRegPasswordless);
             btnSignout = findViewById(R.id.btnSignout);
+            textView = findViewById(R.id.textView);
+            val acBody = Base64.decode(accessToken?.split('.')?.get(1), Base64.DEFAULT);
+            val acBodyJson = JSONObject(String(acBody));
+            textView.text = "Xin chào ${acBodyJson.getString("first_name")} ${acBodyJson.getString("last_name")} " +
+                    "(${acBodyJson.getString("username")})";
             btnSignout.setOnClickListener{
                 sharedPreferences.edit().remove("accessToken").apply();
                 val intent = Intent(this, MainActivity::class.java)
@@ -64,8 +70,15 @@ class RegisterPasswordless: ComponentActivity() {
 
     private fun storeKeyHandle(keyHandle: ByteArray) {
         val sharedPreferences: SharedPreferences = getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
+        val keys = sharedPreferences.getStringSet(RegisterPasswordless.KEY_HANDLE_PREF, null);
+        val newKeys : HashSet<String> = if(keys==null){
+            HashSet();
+        }else{
+            HashSet(keys);
+        }
+        newKeys.add(Base64.encodeToString(keyHandle, BASE64_FLAG));
         sharedPreferences.edit()
-            .putString(RegisterPasswordless.KEY_HANDLE_PREF, Base64.encodeToString(keyHandle, BASE64_FLAG))
+            .putStringSet(RegisterPasswordless.KEY_HANDLE_PREF, newKeys)
             .apply();
     }
 
@@ -177,7 +190,7 @@ class RegisterPasswordless: ComponentActivity() {
                                 var username =
                                     intiateResponse?.getJSONObject("user")!!.getString("name")
                                 var userId = intiateResponse?.getJSONObject("user")!!.getString("id")
-
+                                val pubKeyCredParams = intiateResponse.getJSONArray("pubKeyCredParams");
                                 var authenticatorAttachement = ""
                                 if (intiateResponse.has("authenticatorSelection")) {
                                     if (intiateResponse?.getJSONObject("authenticatorSelection")!!
@@ -213,7 +226,8 @@ class RegisterPasswordless: ComponentActivity() {
                                     userId,
                                     username,
                                     authenticatorAttachement,
-                                    attestationPreference
+                                    attestationPreference,
+                                    pubKeyCredParams
                                 )
                             }catch (e:Exception){
                                 runOnUiThread {
@@ -251,12 +265,19 @@ class RegisterPasswordless: ComponentActivity() {
         rpname: String,
         challenge: ByteArray,
         userId: String,
-        userName: String?,
+        userName: String,
         authenticatorAttachment: String?,
-        attestationPreference: AttestationConveyancePreference
+        attestationPreference: AttestationConveyancePreference,
+        pubKeyCredParams: JSONArray
     ) {
 
         try {
+            val params = ArrayList<PublicKeyCredentialParameters>();
+            for (i in 0 until pubKeyCredParams.length()) {
+                val item = pubKeyCredParams.getJSONObject(i)
+                params.add(PublicKeyCredentialParameters(item.getString("type"),item.getInt("alg")))
+            }
+
             val options = PublicKeyCredentialCreationOptions.Builder()
                 .setAttestationConveyancePreference(attestationPreference)
                 .setRp(PublicKeyCredentialRpEntity(RPID, rpname, null))
@@ -264,28 +285,25 @@ class RegisterPasswordless: ComponentActivity() {
                     PublicKeyCredentialUserEntity(
                         userId.toByteArray(),
                         userId,
-                        null,
+                        "",
                         userName
                     )
                 )
                 .setChallenge(challenge)
                 .setParameters(
-                    listOf(
-                        PublicKeyCredentialParameters(
-                            PublicKeyCredentialType.PUBLIC_KEY.toString(),
-                            EC2Algorithm.ES256.algoValue
-                        )
-                    )
+                    params
                 )
 
             if (authenticatorAttachment != "") {
                 val builder = AuthenticatorSelectionCriteria.Builder()
                 builder.setAttachment(Attachment.fromString("platform"))
+                builder.setRequireResidentKey(true);
+                builder.setResidentKeyRequirement(ResidentKeyRequirement.RESIDENT_KEY_PREFERRED)
                 options.setAuthenticatorSelection(builder.build())
             }
 
             val fido2ApiClient = Fido.getFido2ApiClient(applicationContext)
-//            val fido2PendingIntentTask = fido2ApiClient.getRegisterPendingIntent(options.build());
+//            val fido2PendingIntentTask1 = fido2ApiClient.getRegisterPendingIntent(options.build());
             val fido2PendingIntentTask = fido2ApiClient.getRegisterIntent(options.build())
             fido2PendingIntentTask.addOnSuccessListener { fido2PendingIntent ->
                 if (fido2PendingIntent.hasPendingIntent()) {
@@ -321,7 +339,7 @@ class RegisterPasswordless: ComponentActivity() {
         val attestationObjectBase64 =
             Helper.coerceToBase64Url(attestationResponse.attestationObject, BASE64_FLAG)
 
-        storeKeyHandle(attestationResponse.keyHandle);
+//        storeKeyHandle(attestationResponse.keyHandle);
 
         val webAuthnResponse = JSONObject()
         val response = JSONObject()
